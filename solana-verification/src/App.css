@@ -1,0 +1,99 @@
+.App {
+  text-align: center;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #282c34;
+  color: white;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.verification-content {
+  padding: 2rem;
+  background-color: #1a1c23;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  max-width: 600px;
+  width: 90%;
+  margin: 0 auto;
+}
+
+.address {
+  background-color: #2d3139;
+  padding: 1rem;
+  border-radius: 8px;
+  font-family: monospace;
+  margin: 1rem 0;
+  word-break: break-all;
+}
+
+.wallet-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.verify-button {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.2s;
+}
+
+.verify-button:hover {
+  background-color: #45a049;
+}
+
+.verify-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+/* Override Solana wallet adapter button styles */
+.wallet-adapter-button {
+  background-color: #512da8 !important;
+}
+
+.wallet-adapter-button:hover {
+  background-color: #4527a0 !important;
+}

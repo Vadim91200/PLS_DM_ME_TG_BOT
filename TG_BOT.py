@@ -7,6 +7,8 @@ from urllib.parse import quote_plus
 from dotenv import load_dotenv
 import os
 import random
+import asyncio
+from datetime import datetime
 
 load_dotenv()
 
@@ -32,28 +34,100 @@ selected_message_id = {}
 
 # Function to start the bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.message.from_user.id
-    user_states[user_id] = 'awaiting_solana_address'
-    await update.message.reply_text('Please send me your Solana address.')
+    try:
+        user_id = update.message.from_user.id
+
+        # Create verification URL with React app using ngrok URL
+        verification_url = f"https://8310-89-30-29-68.ngrok-free.app/?userId={user_id}"
+        
+        # Create inline keyboard with verification button
+        keyboard = [[InlineKeyboardButton("Connect Wallet & Verify", url=verification_url)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        user_states[user_id] = 'awaiting_message_selection'
+        
+        # Add retry logic for sending message
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await update.message.reply_text(
+                    'Welcome! Please click the button below to connect your wallet and verify your address:',
+                    reply_markup=reply_markup
+                )
+                break
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Failed to send message after {max_retries} attempts: {str(e)}")
+                    raise
+                await asyncio.sleep(1)  # Wait 1 second before retrying
+                
+    except Exception as e:
+        logger.error(f"Error in start function: {str(e)}")
+        try:
+            await update.message.reply_text(
+                "Sorry, there was an error. Please try again in a few moments."
+            )
+        except:
+            logger.error("Failed to send error message to user")
 
 # Function to handle incoming messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.message.from_user.id
+    try:
+        user_id = update.message.from_user.id
 
-    if user_states.get(user_id) == 'awaiting_solana_address':
-        solana_address = update.message.text
+        if user_states.get(user_id) == 'answering_questions':
+            await check_answer(update, context)
+        elif user_states.get(user_id) == 'awaiting_message_selection':
+            await display_selected_message(update, context)
+        else:
+            # If no valid state, show the verification button again
+            verification_url = f"https://8310-89-30-29-68.ngrok-free.app/?userId={user_id}"
+            keyboard = [[InlineKeyboardButton("Connect Wallet & Verify", url=verification_url)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Add retry logic for sending message
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    await update.message.reply_text(
+                        'Please click the button below to connect your wallet and verify your address:',
+                        reply_markup=reply_markup
+                    )
+                    break
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Failed to send message after {max_retries} attempts: {str(e)}")
+                        raise
+                    await asyncio.sleep(1)  # Wait 1 second before retrying
+                    
+    except Exception as e:
+        logger.error(f"Error in handle_message function: {str(e)}")
+        try:
+            await update.message.reply_text(
+                "Sorry, there was an error. Please try again in a few moments."
+            )
+        except:
+            logger.error("Failed to send error message to user")
 
-        # Save the Solana address to the database
-        addresses_collection.insert_one({'user_id': user_id, 'solana_address': solana_address})
-
+# Function to check verification status
+async def check_verification_status(context: ContextTypes.DEFAULT_TYPE) -> None:
+    job = context.job
+    user_id = job.data['user_id']
+    
+    # Check if address is verified
+    user_data = addresses_collection.find_one({'user_id': user_id})
+    if user_data and user_data.get('verified'):
+        # Stop checking
+        job.schedule_removal()
+        
+        # Update user state
         user_states[user_id] = 'awaiting_message_selection'
-        await update.message.reply_text('Your Solana address has been registered. You can now use /messages to view your pending messages.')
-    elif user_states.get(user_id) == 'answering_questions':
-        await handle_answer(update, context)
-    elif user_states.get(user_id) == 'awaiting_message_selection':
-        await display_selected_message(update, context)
-    else:
-        await update.message.reply_text('Invalid input. Please follow the instructions.')
+        
+        # Send success message
+        await context.bot.send_message(
+            chat_id=user_id,
+            text='Address verified successfully! You can now use /messages to view your pending messages.'
+        )
 
 # Function to display pending messages
 async def display_pending_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -229,6 +303,7 @@ async def handle_message_selection(update: Update, context: ContextTypes.DEFAULT
     else:
         await query.message.edit_text("Message not found. Please try again.")
 
+# Function to check verification status
 # Main function to set up the bot
 def main() -> None:
     application = ApplicationBuilder().token(os.getenv('BOT_TOKEN')).build()
@@ -239,7 +314,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_answer, pattern="^answer_"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    application.run_polling()
+    # Start the bot
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
