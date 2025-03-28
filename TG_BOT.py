@@ -9,6 +9,7 @@ import os
 import random
 import asyncio
 from datetime import datetime
+from bson.objectid import ObjectId
 
 load_dotenv()
 
@@ -25,12 +26,12 @@ db = client.telegram_bot  # Database name
 addresses_collection = db.addresses  # Collection for Solana addresses
 messages_collection = db.messages  # Collection for messages
 
-# Dictionary to keep track of user states and attempts
+# Dictionary to keep track of user states and data
 user_states = {}
-user_attempts = {}
 user_questions = {}
 current_question_index = {}
 selected_message_id = {}
+correct_answers = {}
 
 # Function to start the bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -46,87 +47,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         user_states[user_id] = 'awaiting_message_selection'
         
-        # Add retry logic for sending message
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                await update.message.reply_text(
-                    'Welcome! Please click the button below to connect your wallet and verify your address:',
-                    reply_markup=reply_markup
-                )
-                break
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    logger.error(f"Failed to send message after {max_retries} attempts: {str(e)}")
-                    raise
-                await asyncio.sleep(1)  # Wait 1 second before retrying
+        await update.message.reply_text(
+            'Welcome! Please click the button below to connect your wallet and verify your address:',
+            reply_markup=reply_markup
+        )
                 
     except Exception as e:
         logger.error(f"Error in start function: {str(e)}")
-        try:
-            await update.message.reply_text(
-                "Sorry, there was an error. Please try again in a few moments."
-            )
-        except:
-            logger.error("Failed to send error message to user")
-
-# Function to handle incoming messages
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        user_id = update.message.from_user.id
-
-        if user_states.get(user_id) == 'answering_questions':
-            await check_answer(update, context)
-        elif user_states.get(user_id) == 'awaiting_message_selection':
-            await display_selected_message(update, context)
-        else:
-            # If no valid state, show the verification button again
-            verification_url = f"https://8310-89-30-29-68.ngrok-free.app/?userId={user_id}"
-            keyboard = [[InlineKeyboardButton("Connect Wallet & Verify", url=verification_url)]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            # Add retry logic for sending message
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    await update.message.reply_text(
-                        'Please click the button below to connect your wallet and verify your address:',
-                        reply_markup=reply_markup
-                    )
-                    break
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        logger.error(f"Failed to send message after {max_retries} attempts: {str(e)}")
-                        raise
-                    await asyncio.sleep(1)  # Wait 1 second before retrying
-                    
-    except Exception as e:
-        logger.error(f"Error in handle_message function: {str(e)}")
-        try:
-            await update.message.reply_text(
-                "Sorry, there was an error. Please try again in a few moments."
-            )
-        except:
-            logger.error("Failed to send error message to user")
-
-# Function to check verification status
-async def check_verification_status(context: ContextTypes.DEFAULT_TYPE) -> None:
-    job = context.job
-    user_id = job.data['user_id']
-    
-    # Check if address is verified
-    user_data = addresses_collection.find_one({'user_id': user_id})
-    if user_data and user_data.get('verified'):
-        # Stop checking
-        job.schedule_removal()
-        
-        # Update user state
-        user_states[user_id] = 'awaiting_message_selection'
-        
-        # Send success message
-        await context.bot.send_message(
-            chat_id=user_id,
-            text='Address verified successfully! You can now use /messages to view your pending messages.'
+        await update.message.reply_text(
+            "Sorry, there was an error. Please try again in a few moments."
         )
 
 # Function to display pending messages
@@ -143,10 +72,38 @@ async def display_pending_messages(update: Update, context: ContextTypes.DEFAULT
     # Create inline keyboard with message buttons
     keyboard = []
     for msg in pending_messages:
-        keyboard.append([InlineKeyboardButton(f"{msg['project']} - {msg['title']}", callback_data=f"msg_{msg['_id']}")])
+        # Format the button text to include reward
+        button_text = f"{msg['project']} - {msg['title']} | {msg['reward']}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"msg_{msg['_id']}")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Select a message to read:", reply_markup=reply_markup)
+
+# Function to handle incoming messages
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        user_id = update.message.from_user.id
+
+        if user_states.get(user_id) == 'answering_questions':
+            await check_answer(update, context)
+        elif user_states.get(user_id) == 'awaiting_message_selection':
+            await display_selected_message(update, context)
+        else:
+            # If no valid state, show the verification button again
+            verification_url = f"https://8310-89-30-29-68.ngrok-free.app/?userId={user_id}"
+            keyboard = [[InlineKeyboardButton("Connect Wallet & Verify", url=verification_url)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                'Please click the button below to connect your wallet and verify your address:',
+                reply_markup=reply_markup
+            )
+                    
+    except Exception as e:
+        logger.error(f"Error in handle_message function: {str(e)}")
+        await update.message.reply_text(
+            "Sorry, there was an error. Please try again in a few moments."
+        )
 
 # Function to display the selected message
 async def display_selected_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,12 +123,11 @@ async def display_selected_message(update: Update, context: ContextTypes.DEFAULT
 
             await update.message.reply_text(message_text)
 
-            # Store questions
+            # Store questions and initialize correct answers counter
             user_questions[user_id] = selected_message.get('questions', [])
-            user_attempts[user_id] = 0
             current_question_index[user_id] = 0
+            correct_answers[user_id] = 0
             user_states[user_id] = 'ready_to_ask_questions'
-            await update.message.reply_text("Please answer the following questions to confirm you've read the message.")
             await ask_question(update, context)
         else:
             await update.message.reply_text('Invalid message number. Please try again.')
@@ -206,18 +162,39 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             keyboard.append([InlineKeyboardButton(answer, callback_data=f"answer_{answer}")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        # Create message text with instruction and question
+        message_text = (
+            "Please answer the following questions about the message.\n\n"
+            f"Question {question_index + 1} of {len(user_questions[user_id])}:\n\n"
+            f"{question_set[0]}"
+        )
+        
         if update.callback_query:
-            await message.edit_text(question_set[0], reply_markup=reply_markup)
+            await message.edit_text(message_text, reply_markup=reply_markup)
         else:
-            await message.reply_text(question_set[0], reply_markup=reply_markup)
+            await message.reply_text(message_text, reply_markup=reply_markup)
         user_states[user_id] = 'answering_questions'
     else:
+        # Save the number of correct answers to the database
+        messages_collection.update_one(
+            {'_id': selected_message_id[user_id]},
+            {
+                '$set': {
+                    'read': True,
+                    'correct_answers': correct_answers[user_id],
+                    'total_questions': len(user_questions[user_id]),
+                    'completed_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        # Display completion message without score
+        completion_message = "Thank you for completing all the questions!"
+        
         if update.callback_query:
-            await message.edit_text('You have answered all the questions. Thank you!')
+            await message.edit_text(completion_message)
         else:
-            await message.reply_text('You have answered all the questions. Thank you!')
-        # Mark the message as read after all questions are answered
-        messages_collection.update_one({'_id': selected_message_id[user_id]}, {'$set': {'read': True}})
+            await message.reply_text(completion_message)
         user_states[user_id] = 'awaiting_message_selection'
 
 # Function to handle button callbacks
@@ -230,92 +207,65 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     question_index = current_question_index[user_id]
     question_set = user_questions[user_id][question_index]
 
-    if selected_answer == question_set[1]:  # Correct answer
-        await query.message.edit_text("Correct! Moving to the next question...")
-        user_attempts[user_id] = 0
-        current_question_index[user_id] += 1
-        await ask_question(update, context)
-    else:
-        user_attempts[user_id] += 1
-        attempts_left = 3 - user_attempts[user_id]
-        if attempts_left > 0:
-            # Create a list of all possible answers
-            answers = [question_set[1], question_set[2], question_set[3]]
-            # Shuffle the answers to randomize their order
-            random.shuffle(answers)
-            
-            # Create inline keyboard with the answers
-            keyboard = []
-            for answer in answers:
-                keyboard.append([InlineKeyboardButton(answer, callback_data=f"answer_{answer}")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.message.edit_text(
-                f"{question_set[0]}\n\nIncorrect. You have {attempts_left} attempts left. Please try again.",
-                reply_markup=reply_markup
-            )
-        else:
-            await query.message.edit_text("You have used all your attempts. Please read the message again.")
-            user_states[user_id] = 'awaiting_message_selection'
+    # Silently track correct answers without showing feedback
+    if selected_answer == question_set[1]:
+        correct_answers[user_id] += 1
+    
+    # Move to next question immediately
+    current_question_index[user_id] += 1
+    await ask_question(update, context)
 
 # Function to handle message selection
 async def handle_message_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()  # Answer the callback query to remove loading state
+    await query.answer()
     
-    user_id = query.from_user.id
-    message_id = query.data.replace("msg_", "")
-    
-    # Fetch the selected message from the database
-    # MongoDB ObjectId needs to be converted from string
-    from bson.objectid import ObjectId
-    selected_message = messages_collection.find_one({'_id': ObjectId(message_id)})
-    
-    if selected_message:
-        message_text = f"Message from {selected_message['project']}:\n{selected_message['content']}"
+    try:
+        user_id = query.from_user.id
+        message_id = query.data.replace("msg_", "")
         
-        # Store the selected message ID
-        selected_message_id[user_id] = selected_message['_id']
+        # Fetch the selected message
+        selected_message = messages_collection.find_one({'_id': ObjectId(message_id)})
+        if selected_message:
+            message_text = f"Message from {selected_message['project']}:\n{selected_message['content']}"
+            
+            # Store the selected message ID
+            selected_message_id[user_id] = selected_message['_id']
+            
+            # Show the message content first
+            await query.message.edit_text(message_text)
+            
+            # Store questions and initialize correct answers counter
+            user_questions[user_id] = selected_message.get('questions', [])
+            current_question_index[user_id] = 0
+            correct_answers[user_id] = 0
+            user_states[user_id] = 'ready_to_ask_questions'
+            
+            # Send a separate message for questions after showing the content
+            waiting_message = await query.message.reply_text("Please read the message above carefully. The questions will start in 5 seconds...")
+            await asyncio.sleep(5)  # Give user 5 seconds to read
+            await waiting_message.delete()  # Delete the waiting message
+            await ask_question(update, context)
+        else:
+            await query.message.edit_text("Sorry, this message is no longer available.")
+            
+    except Exception as e:
+        logger.error(f"Error in handle_message_selection: {str(e)}")
+        await query.message.edit_text("Sorry, there was an error processing your selection.")
 
-        await query.message.edit_text(message_text)
-
-        # Store questions
-        user_questions[user_id] = selected_message.get('questions', [])
-        user_attempts[user_id] = 0
-        current_question_index[user_id] = 0
-        user_states[user_id] = 'ready_to_ask_questions'
-        
-        # Send instruction text first
-        await query.message.reply_text("Please answer the following questions to confirm you've read the message.")
-        
-        # Then send the first question
-        question_set = user_questions[user_id][0]
-        answers = [question_set[1], question_set[2], question_set[3]]
-        random.shuffle(answers)
-        
-        keyboard = []
-        for answer in answers:
-            keyboard.append([InlineKeyboardButton(answer, callback_data=f"answer_{answer}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.message.reply_text(question_set[0], reply_markup=reply_markup)
-        user_states[user_id] = 'answering_questions'
-    else:
-        await query.message.edit_text("Message not found. Please try again.")
-
-# Function to check verification status
-# Main function to set up the bot
 def main() -> None:
+    # Create the Application and pass it your bot's token
     application = ApplicationBuilder().token(os.getenv('BOT_TOKEN')).build()
 
+    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("messages", display_pending_messages))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(handle_message_selection, pattern="^msg_"))
     application.add_handler(CallbackQueryHandler(handle_answer, pattern="^answer_"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start the bot
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Run the bot
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
