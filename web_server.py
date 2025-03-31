@@ -35,7 +35,7 @@ TELEGRAM_BOT_TOKEN = os.getenv('BOT_TOKEN')  # Changed from TELEGRAM_BOT_TOKEN t
 # API URL for the React app
 API_URL = 'https://05d4-89-30-29-68.ngrok-free.app'
 
-def send_telegram_message(chat_id, message):
+def send_telegram_message(chat_id, message, include_inbox_button=False):
     try:
         if not TELEGRAM_BOT_TOKEN:
             logger.error("Telegram bot token is not set!")
@@ -47,6 +47,16 @@ def send_telegram_message(chat_id, message):
             "text": message,
             "parse_mode": "HTML"
         }
+
+        # Add inline keyboard for inbox button if requested
+        if include_inbox_button:
+            data["reply_markup"] = {
+                "inline_keyboard": [[{
+                    "text": "📥 Check my Inbox",
+                    "callback_data": "check_inbox"
+                }]]
+            }
+
         logger.info(f"Sending Telegram message to chat_id {chat_id}")
         response = requests.post(url, json=data)
         response.raise_for_status()  # Raise an exception for bad status codes
@@ -125,16 +135,19 @@ def verify_signature():
             )
             logger.info(f"Database updated for user {data['user_id']}")
 
-            # Send Telegram notification
+            # Send success message without button
             success_message = (
                 f"✅ <b>Address Verified Successfully!</b>\n\n"
                 f"Your Solana address has been verified and saved:\n"
-                f"<code>{data['publicKey']}</code>\n\n"
-                f"You can now use the bot's features."
+                f"<code>{data['publicKey']}</code>"
             )
             telegram_response = send_telegram_message(data['user_id'], success_message)
+
+            # Send separate message with inbox button
+            inbox_message = "Click below to check your messages:"
+            telegram_response_button = send_telegram_message(data['user_id'], inbox_message, include_inbox_button=True)
             
-            if not telegram_response:
+            if not telegram_response or not telegram_response_button:
                 logger.error(f"Failed to send Telegram message to user {data['user_id']}")
                 # Continue with success response even if Telegram message fails
                 # The user can still see the success in the web interface

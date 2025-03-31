@@ -1,2 +1,2 @@
 // API URL for the Flask server
-export const API_URL = 'https://8310-89-30-29-68.ngrok-free.app'; 
+export const API_URL = 'https://8140-2a02-8428-2979-201-acee-f626-9af9-cbc.ngrok-free.app'; 
